@@ -4,6 +4,22 @@ A collection of Home Assistant automation blueprints by [@joohann](https://githu
 
 ## Blueprints
 
+### 🪟 Curtains Based On Lux And Window State
+
+Closes curtains automatically when lux drops below a threshold. If windows are open, waits until they are closed. The wait is aborted at sunrise (lux above open threshold AND sun above horizon). Opens curtains when it gets light again.
+
+**Features:**
+- Configurable close and open lux thresholds
+- Supports multiple cover entities
+- Optional window sensor check (multiple sensors supported)
+- Waits for windows to close before closing curtains
+- Aborts waiting at sunrise (lux high AND sun above horizon)
+- Configurable delay after windows close
+
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2Fjoohann%2Fha-blueprints%2Fmain%2Fblueprints%2Fautomation%2Fcurtains-lux-window.yaml)
+
+---
+
 ### 🏠 Appliance Done Notification
 
 Sends a push notification when an appliance (washing machine, dryer, dishwasher, etc.) has finished its cycle. Uses power consumption data to detect when the appliance is truly done, with protection against false alerts from short power dips.
@@ -18,34 +34,17 @@ Sends a push notification when an appliance (washing machine, dryer, dishwasher,
 
 ---
 
-### 🚨 Luchtalarm Test Melding
+### 🚨 Dutch Siren Test Notification
 
-Stuurt een kritieke pushmelding 10 seconden voor de maandelijkse luchtalarmtest. Activeert op de eerste maandag van de maand, onderdrukt op feestdagen.
-
-**Kenmerken:**
-- Instelbare meldingstijd
-- Feestdagenkalender controle
-- Kritieke melding op iOS én Android (negeert stil/niet storen)
-- Meerdere apparaten tegelijk
-- Geschikt voor Nederland (WAS-Alert) en vergelijkbare landen
-
-[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2Fjoohann%2Fha-blueprints%2Fmain%2Fblueprints%2Fautomation%2Fnational-siren-test-notification.yaml)
-
----
-
-### 🪟 Curtains Based On Lux And Window State
-
-Closes curtains automatically when lux drops below a threshold. If windows are open, waits until they are closed. The wait is aborted at sunrise (lux above open threshold AND sun above horizon). Opens curtains when it gets light again.
+Sends a critical push notification 10 seconds before the monthly Dutch siren test (WAS-Alert). Triggers on the first Monday of the month, suppressed on public holidays.
 
 **Features:**
-- Configurable close and open lux thresholds
-- Supports multiple cover entities
-- Optional window sensor check (multiple sensors supported)
-- Waits for windows to close before closing curtains
-- Aborts waiting at sunrise (lux high AND sun above horizon)
-- Configurable delay after windows close
+- Configurable trigger time
+- Public holiday calendar check
+- Critical push notification on iOS and Android (bypasses silent/do not disturb)
+- Supports multiple notification devices
 
-[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2Fjoohann%2Fha-blueprints%2Fmain%2Fblueprints%2Fautomation%2Fcurtains-lux-window.yaml)
+[![Import blueprint](https://my.home-assistant.io/badges/blueprint_import.svg)](https://my.home-assistant.io/redirect/blueprint_import/?blueprint_url=https%3A%2F%2Fraw.githubusercontent.com%2Fjoohann%2Fha-blueprints%2Fmain%2Fblueprints%2Fautomation%2Fnational-siren-test-notification.yaml)
 
 ---
 
@@ -63,10 +62,10 @@ Paste the raw URL of the blueprint YAML file.
 blueprints/
 └── automation/
     ├── appliance-done-notification.yaml
+    ├── curtains-lux-window.yaml
     └── national-siren-test-notification.yaml
 ```
 
 ## License
 
 MIT License — feel free to use, modify, and share.
-
