@@ -1,0 +1,40 @@
+name: Validate Blueprints
+
+on:
+  push:
+    paths:
+      - "blueprints/**/*.yaml"
+  pull_request:
+    paths:
+      - "blueprints/**/*.yaml"
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    name: Validate YAML syntax
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install pyyaml
+
+      - name: Validate all blueprint YAML files
+        run: |
+          import sys, yaml, pathlib
+          errors = []
+          for f in pathlib.Path("blueprints").rglob("*.yaml"):
+              try:
+                  yaml.safe_load(f.read_text())
+                  print(f"✅ {f}")
+              except yaml.YAMLError as e:
+                  errors.append(f"❌ {f}: {e}")
+          if errors:
+              print("\n".join(errors))
+              sys.exit(1)
+        shell: python

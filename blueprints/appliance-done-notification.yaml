@@ -1,0 +1,150 @@
+blueprint:
+  name: "Appliance Done Notification 🏠"
+  description: >
+    Universal blueprint for sending a notification when an appliance has finished.
+    Suitable for dishwasher, washing machine, dryer, or any other appliance with a power sensor.
+
+    How it works:
+    - Notification is sent when power drops below the threshold and stays low
+    - Prevents false alerts during short power dips (unavailable/unknown)
+    - Checks whether the appliance was active long enough before sending
+
+    Recommended threshold values based on sensor data:
+    - Washing machine:  active ±50–2000W  → threshold 10W, stability 120s
+    - Dryer:            active ±50–5000W  → threshold 10W, stability 120s
+    - Dishwasher:       active ±60–2200W  → threshold 10W, stability 60s
+
+  domain: automation
+  homeassistant:
+    min_version: "2024.6.0"
+  input:
+    power_sensor:
+      name: Power sensor
+      description: "The sensor measuring power consumption (in Watt)"
+      selector:
+        entity:
+          domain: sensor
+          device_class: power
+
+    threshold_watt:
+      name: Threshold (Watt)
+      description: >
+        Below which wattage is the appliance considered 'done'?
+        Recommended: 10W (prevents false alerts from standby consumption)
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: W
+
+    stability_seconds:
+      name: Stability duration (seconds)
+      description: >
+        How long must power stay below the threshold before alerting?
+        Recommended: 120s (prevents false alerts during short power dips)
+      default: 120
+      selector:
+        number:
+          min: 10
+          max: 300
+          step: 10
+          unit_of_measurement: s
+
+    min_active_watt:
+      name: Minimum active power (Watt)
+      description: >
+        From which wattage is the appliance considered 'active'?
+        Prevents a notification if the appliance was never running.
+        Recommended: 50W
+      default: 50
+      selector:
+        number:
+          min: 10
+          max: 500
+          step: 5
+          unit_of_measurement: W
+
+    min_active_duration:
+      name: Minimum active duration (seconds)
+      description: >
+        How long must the appliance have been active before a notification is sent?
+        Prevents alerts from accidentally switching the appliance on briefly.
+        Recommended: 600s (10 minutes)
+      default: 600
+      selector:
+        number:
+          min: 60
+          max: 3600
+          step: 60
+          unit_of_measurement: s
+
+    notification_message:
+      name: Notification message
+      description: "The body text of the notification"
+      default: "The appliance is done ✅"
+      selector:
+        text:
+
+    notify_devices:
+      name: Devices to notify
+      description: >
+        Select the mobile devices that receive the notification.
+        Multiple devices can be selected.
+      selector:
+        device:
+          integration: mobile_app
+          multiple: true
+
+mode: single
+
+trigger:
+  - trigger: numeric_state
+    entity_id: !input power_sensor
+    below: !input threshold_watt
+    for:
+      seconds: !input stability_seconds
+
+variables:
+  min_active_watt: !input min_active_watt
+  min_active_duration: !input min_active_duration
+  power_sensor: !input power_sensor
+
+condition:
+  - condition: template
+    value_template: >
+      {% set from_state = trigger.from_state %}
+      {% set to_state   = trigger.to_state %}
+
+      {# Skip if states are invalid #}
+      {% if from_state is none or to_state is none %}
+        false
+      {% elif from_state.state in ['unknown', 'unavailable'] or
+              to_state.state   in ['unknown', 'unavailable'] %}
+        false
+      {% else %}
+        {# Was the appliance active just before the transition? #}
+        {% set was_active = (from_state.state | float(0)) >= min_active_watt %}
+
+        {# Check via history whether the appliance was active long enough #}
+        {% set history = state_history(
+              power_sensor,
+              min_active_duration,
+              now()
+           ) | selectattr('state', 'is_number')
+             | selectattr('state', 'ge', min_active_watt | string)
+             | list %}
+        {% set long_enough = history | length > 0 %}
+
+        {{ was_active and long_enough }}
+      {% endif %}
+
+action:
+  - repeat:
+      for_each: !input notify_devices
+      sequence:
+        - action: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
+          data:
+            message: !input notification_message
+            title: "Appliance done 🏠"

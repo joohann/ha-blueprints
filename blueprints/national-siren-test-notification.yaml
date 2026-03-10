@@ -1,0 +1,75 @@
+blueprint:
+  name: "Dutch Siren Test Notification 🚨"
+  description: >
+    Sends a critical push notification before the monthly Dutch siren test (WAS-Alert).
+    Triggers on the first Monday of the month, only if it is not a public holiday.
+
+    Default timing is 11:59:50 — 10 seconds before the 12:00 siren test.
+
+    Works on both iOS and Android (critical alert bypasses silent/do not disturb).
+
+  domain: automation
+  homeassistant:
+    min_version: "2024.6.0"
+  input:
+    trigger_time:
+      name: Notification time
+      description: "When to send the notification. Default: 11:59:50 (10 seconds before the siren)"
+      default: "11:59:50"
+      selector:
+        time:
+
+    holiday_calendar:
+      name: Public holiday calendar
+      description: "Calendar entity used to check for public holidays. Notification is suppressed on holidays."
+      selector:
+        entity:
+          domain: calendar
+
+    notification_message:
+      name: Notification message
+      description: "The body text of the push notification."
+      default: "In 10 seconds there will be a TEST of the Dutch siren (WAS-Alert) 🚨"
+      selector:
+        text:
+
+    notify_devices:
+      name: Devices to notify
+      description: "Select one or more mobile devices to receive the critical alert."
+      selector:
+        device:
+          integration: mobile_app
+          multiple: true
+
+mode: single
+
+trigger:
+  - trigger: time
+    at: !input trigger_time
+
+condition:
+  - condition: template
+    value_template: "{{ now().day <= 7 and now().weekday() == 0 }}"
+  - condition: state
+    entity_id: !input holiday_calendar
+    state: "off"
+
+action:
+  - repeat:
+      for_each: !input notify_devices
+      sequence:
+        - action: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
+          data:
+            message: !input notification_message
+            title: "Dutch Siren Test 🚨"
+            data:
+              # iOS: critical alert (bypasses silent/DND)
+              push:
+                sound:
+                  name: default
+                  critical: 1
+                  volume: 1
+              # Android: high priority channel (bypasses DND)
+              ttl: 0
+              priority: high
+              channel: alarm_stream
