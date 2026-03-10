@@ -1,0 +1,148 @@
+blueprint:
+  name: "Curtains Based On Lux And Window State 🪟"
+  description: >
+    Closes curtains automatically when lux drops below a threshold.
+    If windows are open, waits until they are closed before closing the curtains.
+    The wait is aborted when it gets light again (lux above open threshold AND sun is above horizon).
+    Opens curtains automatically when lux rises above the open threshold.
+
+  domain: automation
+  homeassistant:
+    min_version: "2024.6.0"
+
+  input:
+    curtain_cover:
+      name: Curtain entities
+      description: One or more cover entities to control.
+      selector:
+        entity:
+          domain: cover
+          multiple: true
+
+    light_sensor:
+      name: Light sensor
+      description: The sensor measuring lux values.
+      selector:
+        entity:
+          domain: sensor
+          device_class: illuminance
+
+    lux_close_threshold:
+      name: Close threshold (lux)
+      description: Curtains close when lux drops below this value.
+      default: 100
+      selector:
+        number:
+          min: 0
+          max: 500
+          unit_of_measurement: lux
+
+    lux_open_threshold:
+      name: Open threshold (lux)
+      description: >
+        Curtains open when lux rises above this value.
+        Also used (combined with sun above horizon) to abort waiting when windows are open.
+      default: 200
+      selector:
+        number:
+          min: 0
+          max: 500
+          unit_of_measurement: lux
+
+    window_sensors:
+      name: Window contact sensors
+      description: Select window sensors. If all are closed, curtains close immediately. (optional)
+      default: []
+      selector:
+        entity:
+          domain: binary_sensor
+          multiple: true
+
+    delay_seconds:
+      name: Delay after windows close (seconds)
+      description: How long to wait after windows are closed before closing the curtains.
+      default: 10
+      selector:
+        number:
+          min: 0
+          max: 300
+          unit_of_measurement: seconds
+
+variables:
+  window_sensors: !input window_sensors
+  lux_open_threshold: !input lux_open_threshold
+  light_sensor: !input light_sensor
+
+trigger:
+  - trigger: numeric_state
+    id: lux_low
+    entity_id: !input light_sensor
+    below: !input lux_close_threshold
+
+  - trigger: numeric_state
+    id: lux_high
+    entity_id: !input light_sensor
+    above: !input lux_open_threshold
+
+condition: []
+
+action:
+  - choose:
+
+      # Lux drops → close curtains
+      - conditions:
+          - condition: trigger
+            id: lux_low
+        sequence:
+          - choose:
+
+              # No windows configured or all windows closed → close immediately
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ window_sensors | length == 0 or
+                         expand(window_sensors) | map(attribute='state') | list | unique == ['off'] }}
+                sequence:
+                  - action: cover.close_cover
+                    target:
+                      entity_id: !input curtain_cover
+
+              # Windows open → wait until closed, abort if sunrise AND lux high
+              - conditions:
+                  - condition: template
+                    value_template: >
+                      {{ window_sensors | length > 0 and
+                         expand(window_sensors) | map(attribute='state') | list | unique != ['off'] }}
+                sequence:
+                  - wait_template: >
+                      {{ expand(window_sensors) | map(attribute='state') | list | unique == ['off']
+                         or (
+                           (states(light_sensor) | float(0)) >= lux_open_threshold
+                           and is_state('sun.sun', 'above_horizon')
+                         ) }}
+                    timeout:
+                      hours: 12
+                    continue_on_timeout: false
+                  # Only close if it's still dark (not aborted by sunrise)
+                  - condition: template
+                    value_template: >
+                      {{ not (
+                        (states(light_sensor) | float(0)) >= lux_open_threshold
+                        and is_state('sun.sun', 'above_horizon')
+                      ) }}
+                  - delay:
+                      seconds: !input delay_seconds
+                  - action: cover.close_cover
+                    target:
+                      entity_id: !input curtain_cover
+
+      # Lux rises → open curtains
+      - conditions:
+          - condition: trigger
+            id: lux_high
+        sequence:
+          - action: cover.open_cover
+            target:
+              entity_id: !input curtain_cover
+
+mode: single
