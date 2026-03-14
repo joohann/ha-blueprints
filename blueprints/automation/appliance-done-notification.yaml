@@ -117,27 +117,20 @@ condition:
       {% set from_state = trigger.from_state %}
       {% set to_state   = trigger.to_state %}
 
-      {# Skip if states are invalid #}
       {% if from_state is none or to_state is none %}
         false
-      {% elif from_state.state in ['unknown', 'unavailable'] or
-              to_state.state   in ['unknown', 'unavailable'] %}
+      {% elif to_state.state in ['unknown', 'unavailable'] %}
         false
       {% else %}
-        {# Was the appliance active just before the transition? #}
-        {% set was_active = (from_state.state | float(0)) >= min_active_watt %}
-
-        {# Check via history whether the appliance was active long enough #}
-        {% set history = state_history(
-              power_sensor,
-              min_active_duration,
-              now()
-           ) | selectattr('state', 'is_number')
-             | selectattr('state', 'ge', min_active_watt | string)
-             | list %}
-        {% set long_enough = history | length > 0 %}
-
-        {{ was_active and long_enough }}
+        {% set ns = namespace(was_active=false) %}
+        {% for s in state_history(power_sensor, min_active_duration, now()) %}
+          {% if s.state not in ['unknown', 'unavailable'] %}
+            {% if (s.state | float(0)) >= min_active_watt %}
+              {% set ns.was_active = true %}
+            {% endif %}
+          {% endif %}
+        {% endfor %}
+        {{ ns.was_active }}
       {% endif %}
 
 action:
