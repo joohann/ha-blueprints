@@ -1,0 +1,208 @@
+blueprint:
+  name: "Toilet Light - Door & Occupancy 🚽"
+  description: >
+    Smart toilet lighting based on a door sensor and occupancy sensor.
+
+    Logic:
+    - Light ON  → door opens
+    - Light OFF → occupancy gone for X seconds AND door state has changed since light turned on
+    - Light OFF → after 30 minutes regardless (absolute fallback)
+
+    Supports day / evening / bedtime brightness and color temperature modes.
+
+  domain: automation
+  homeassistant:
+    min_version: "2024.6.0"
+
+  input:
+    door_sensor:
+      name: Door sensor
+      description: "Contact sensor of the toilet door (open/closed)"
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: door
+
+    occupancy_sensor:
+      name: Occupancy sensor
+      description: "Occupancy sensor (mmWave radar) — occupied/not occupied"
+      selector:
+        entity:
+          domain: binary_sensor
+          device_class: occupancy
+
+    light:
+      name: Light
+      description: "The toilet light entity"
+      selector:
+        entity:
+          domain: light
+
+    occupancy_timeout:
+      name: Occupancy timeout (seconds)
+      description: >
+        How long must occupancy be gone before checking door state?
+        Recommended: 60 seconds.
+      default: 60
+      selector:
+        number:
+          min: 10
+          max: 300
+          step: 10
+          unit_of_measurement: s
+
+    absolute_timeout:
+      name: Absolute timeout (minutes)
+      description: "Light turns off after this many minutes regardless of occupancy or door state."
+      default: 30
+      selector:
+        number:
+          min: 5
+          max: 60
+          step: 5
+          unit_of_measurement: min
+
+    # --- Day mode ---
+    default_brightness:
+      name: Brightness (day)
+      default: 100
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+
+    default_color_temp:
+      name: Color temperature (day)
+      default: 4000
+      selector:
+        color_temp:
+          min: 1500
+          max: 7000
+          unit: kelvin
+
+    # --- Evening mode ---
+    evening_mode:
+      name: Evening mode helper
+      description: "input_boolean that indicates evening mode is active"
+      selector:
+        entity:
+          domain: input_boolean
+
+    evening_brightness:
+      name: Brightness (evening)
+      default: 50
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+
+    evening_color_temp:
+      name: Color temperature (evening)
+      default: 2500
+      selector:
+        color_temp:
+          min: 1500
+          max: 7000
+          unit: kelvin
+
+    # --- Bedtime mode ---
+    bedtime_mode:
+      name: Bedtime mode helper
+      description: "input_boolean that indicates bedtime mode is active"
+      selector:
+        entity:
+          domain: input_boolean
+
+    bedtime_brightness:
+      name: Brightness (bedtime)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          unit_of_measurement: "%"
+          mode: slider
+
+    bedtime_color_temp:
+      name: Color temperature (bedtime)
+      default: 1500
+      selector:
+        color_temp:
+          min: 1500
+          max: 7000
+          unit: kelvin
+
+variables:
+  evening_mode: !input evening_mode
+  bedtime_mode: !input bedtime_mode
+  default_brightness: !input default_brightness
+  default_color_temp: !input default_color_temp
+  evening_brightness: !input evening_brightness
+  evening_color_temp: !input evening_color_temp
+  bedtime_brightness: !input bedtime_brightness
+  bedtime_color_temp: !input bedtime_color_temp
+  door_sensor: !input door_sensor
+
+mode: single
+
+trigger:
+  # Door opens → light on
+  - trigger: state
+    entity_id: !input door_sensor
+    to: "on"
+    id: door_open
+
+action:
+  # Store the door state at the moment the light turns on
+  - variables:
+      door_state_at_start: "{{ states(door_sensor) }}"
+
+  # Turn light on with correct brightness/color
+  - action: light.turn_on
+    target:
+      entity_id: !input light
+    data:
+      brightness_pct: >
+        {% if is_state(bedtime_mode, 'on') %}
+          {{ bedtime_brightness }}
+        {% elif is_state(evening_mode, 'on') %}
+          {{ evening_brightness }}
+        {% else %}
+          {{ default_brightness }}
+        {% endif %}
+      color_temp_kelvin: >
+        {% if is_state(bedtime_mode, 'on') %}
+          {{ bedtime_color_temp }}
+        {% elif is_state(evening_mode, 'on') %}
+          {{ evening_color_temp }}
+        {% else %}
+          {{ default_color_temp }}
+        {% endif %}
+
+  # Wait for occupancy gone OR absolute timeout
+  - wait_for_trigger:
+      - trigger: state
+        entity_id: !input occupancy_sensor
+        to: "off"
+        for:
+          seconds: !input occupancy_timeout
+    timeout:
+      minutes: !input absolute_timeout
+    continue_on_timeout: true
+
+  # Only turn off if door state has changed since light turned on, OR timeout reached
+  - if:
+      - condition: template
+        value_template: >
+          {{ wait.completed == false or states(door_sensor) != door_state_at_start }}
+    then:
+      - action: light.turn_off
+        target:
+          entity_id: !input light
