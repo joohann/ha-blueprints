@@ -41,7 +41,7 @@ blueprint:
     occupancy_timeout:
       name: Occupancy timeout (seconds)
       description: >
-        How long must occupancy be gone before checking door state?
+        How long must occupancy be gone before the light turns off?
         Recommended: 60 seconds.
       default: 60
       selector:
@@ -53,16 +53,31 @@ blueprint:
 
     absolute_timeout:
       name: Absolute timeout (minutes)
-      description: "Light turns off after this many minutes regardless of occupancy or door state."
+      description: >
+        Light turns off after this many minutes regardless of occupancy or door state.
+        Recommended: 30 minutes.
       default: 30
       selector:
         number:
           min: 5
-          max: 60
+          max: 120
           step: 5
           unit_of_measurement: min
 
-    # --- Day mode ---
+    evening_mode:
+      name: Evening mode helper
+      description: "input_boolean that indicates evening mode is active"
+      selector:
+        entity:
+          domain: input_boolean
+
+    bedtime_mode:
+      name: Bedtime mode helper
+      description: "input_boolean that indicates bedtime mode is active"
+      selector:
+        entity:
+          domain: input_boolean
+
     default_brightness:
       name: Brightness (day)
       default: 100
@@ -83,17 +98,9 @@ blueprint:
           max: 7000
           unit: kelvin
 
-    # --- Evening mode ---
-    evening_mode:
-      name: Evening mode helper
-      description: "input_boolean that indicates evening mode is active"
-      selector:
-        entity:
-          domain: input_boolean
-
     evening_brightness:
       name: Brightness (evening)
-      default: 50
+      default: 60
       selector:
         number:
           min: 1
@@ -104,20 +111,12 @@ blueprint:
 
     evening_color_temp:
       name: Color temperature (evening)
-      default: 2500
+      default: 2700
       selector:
         color_temp:
           min: 1500
           max: 7000
           unit: kelvin
-
-    # --- Bedtime mode ---
-    bedtime_mode:
-      name: Bedtime mode helper
-      description: "input_boolean that indicates bedtime mode is active"
-      selector:
-        entity:
-          domain: input_boolean
 
     bedtime_brightness:
       name: Brightness (bedtime)
@@ -148,23 +147,17 @@ variables:
   evening_color_temp: !input evening_color_temp
   bedtime_brightness: !input bedtime_brightness
   bedtime_color_temp: !input bedtime_color_temp
-  door_sensor: !input door_sensor
 
-mode: restart
+mode: single
 
 trigger:
-  # Door opens → light on
   - trigger: state
     entity_id: !input door_sensor
     to: "on"
     id: door_open
 
 action:
-  # Store the door state at the moment the light turns on
-  - variables:
-      door_state_at_start: "{{ states(door_sensor) }}"
-
-  # Turn light on with correct brightness/color
+  # Step 1: turn light on
   - action: light.turn_on
     target:
       entity_id: !input light
@@ -186,7 +179,11 @@ action:
           {{ default_color_temp }}
         {% endif %}
 
-  # Wait for occupancy gone OR absolute timeout
+  # Step 2: remember door state at moment light turned on
+  - variables:
+      door_state_at_start: "{{ states(trigger.entity_id) }}"
+
+  # Step 3: wait until occupancy gone OR absolute timeout
   - wait_for_trigger:
       - trigger: state
         entity_id: !input occupancy_sensor
@@ -197,11 +194,14 @@ action:
       minutes: !input absolute_timeout
     continue_on_timeout: true
 
-  # Only turn off if door state has changed since light turned on, OR timeout reached
+  # Step 4: turn light off
+  #   - always if absolute timeout reached (wait.completed == false)
+  #   - only if door state has changed since light turned on
   - if:
       - condition: template
         value_template: >
-          {{ wait.completed == false or states(door_sensor) != door_state_at_start }}
+          {{ not wait.completed or
+             states(trigger.entity_id) != door_state_at_start }}
     then:
       - action: light.turn_off
         target:
