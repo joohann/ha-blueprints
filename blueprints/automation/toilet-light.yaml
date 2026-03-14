@@ -150,7 +150,7 @@ variables:
   bedtime_color_temp: !input bedtime_color_temp
   door_sensor: !input door_sensor
 
-mode: single
+mode: restart
 
 trigger:
   # Door opens → light on
