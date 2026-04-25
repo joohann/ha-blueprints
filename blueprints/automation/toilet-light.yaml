@@ -5,10 +5,14 @@ blueprint:
 
     Logic:
     - Light ON  → door opens
-    - Light OFF → occupancy gone for X seconds AND door state has changed since light turned on
-    - Light OFF → after 30 minutes regardless (absolute fallback)
+    - Light OFF → occupancy gone for X seconds (default 60s)
+    - Light OFF → after absolute timeout regardless (default 30 min, fallback)
 
     Supports day / evening / bedtime brightness and color temperature modes.
+
+    Uses mode: restart so each new door opening resets the wait timer,
+    preventing "Already running" warnings when the toilet is used in
+    quick succession.
 
   domain: automation
   homeassistant:
@@ -54,7 +58,8 @@ blueprint:
     absolute_timeout:
       name: Absolute timeout (minutes)
       description: >
-        Light turns off after this many minutes regardless of occupancy or door state.
+        Light turns off after this many minutes regardless of occupancy.
+        Acts as a safety fallback in case the occupancy sensor gets stuck.
         Recommended: 30 minutes.
       default: 30
       selector:
@@ -148,7 +153,7 @@ variables:
   bedtime_brightness: !input bedtime_brightness
   bedtime_color_temp: !input bedtime_color_temp
 
-mode: single
+mode: restart
 
 trigger:
   - trigger: state
@@ -157,7 +162,7 @@ trigger:
     id: door_open
 
 action:
-  # Step 1: turn light on
+  # Step 1: turn light on with mode-appropriate settings
   - action: light.turn_on
     target:
       entity_id: !input light
@@ -179,11 +184,7 @@ action:
           {{ default_color_temp }}
         {% endif %}
 
-  # Step 2: remember door state at moment light turned on
-  - variables:
-      door_state_at_start: "{{ states(trigger.entity_id) }}"
-
-  # Step 3: wait until occupancy gone OR absolute timeout
+  # Step 2: wait for occupancy gone for X seconds, with absolute timeout fallback
   - wait_for_trigger:
       - trigger: state
         entity_id: !input occupancy_sensor
@@ -194,15 +195,7 @@ action:
       minutes: !input absolute_timeout
     continue_on_timeout: true
 
-  # Step 4: turn light off
-  #   - always if absolute timeout reached (wait.completed == false)
-  #   - only if door state has changed since light turned on
-  - if:
-      - condition: template
-        value_template: >
-          {{ not wait.completed or
-             states(trigger.entity_id) != door_state_at_start }}
-    then:
-      - action: light.turn_off
-        target:
-          entity_id: !input light
+  # Step 3: turn light off (either via occupancy gone or absolute timeout)
+  - action: light.turn_off
+    target:
+      entity_id: !input light
