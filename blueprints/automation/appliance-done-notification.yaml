@@ -2,17 +2,24 @@ blueprint:
   name: "Appliance Done Notification 🏠"
   description: >
     Universal blueprint for sending a notification when an appliance has finished.
-    Suitable for dishwasher, washing machine, dryer, or any other appliance with a power sensor.
+    Suitable for dishwasher, washing machine, dryer, or any other appliance with
+    a power sensor.
 
     How it works:
-    - Notification is sent when power drops below the threshold and stays low
-    - Prevents false alerts during short power dips (unavailable/unknown)
-    - Checks whether the appliance was active long enough before sending
+    - Step 1: the blueprint waits until the appliance has been continuously
+      active (above the minimum-active wattage for the minimum duration).
+      Only then does it open a "really running" session.
+    - Step 2: once the power then drops below the threshold and stays there
+      stably, the notification is sent.
+    - Brief on/off blips or sub-minimum-duration dips do not produce
+      a notification.
+    - mode: restart — if the appliance ramps back up during step 1 or 2,
+      the watch is restarted from scratch.
 
-    Recommended threshold values based on sensor data:
-    - Washing machine:  active ±50–2000W  → threshold 10W, stability 120s
-    - Dryer:            active ±50–5000W  → threshold 10W, stability 120s
-    - Dishwasher:       active ±60–2200W  → threshold 10W, stability 60s
+    Threshold starting points by appliance type:
+    - Washing machine:  active ±50–2000W → threshold 10W, stability 60s
+    - Dryer:            active ±50–5000W → threshold 10W, stability 60s
+    - Dishwasher:       active ±60–2200W → threshold 10W, stability 60s
 
   domain: automation
   homeassistant:
@@ -30,7 +37,7 @@ blueprint:
       name: Threshold (Watt)
       description: >
         Below which wattage is the appliance considered 'done'?
-        Recommended: 10W (prevents false alerts from standby consumption)
+        Recommended: 10W (prevents false alerts from standby consumption).
       default: 10
       selector:
         number:
@@ -43,12 +50,12 @@ blueprint:
       name: Stability duration (seconds)
       description: >
         How long must power stay below the threshold before alerting?
-        Recommended: 120s (prevents false alerts during short power dips)
-      default: 120
+        Recommended: 60 seconds.
+      default: 60
       selector:
         number:
           min: 10
-          max: 300
+          max: 600
           step: 10
           unit_of_measurement: s
 
@@ -56,8 +63,8 @@ blueprint:
       name: Minimum active power (Watt)
       description: >
         From which wattage is the appliance considered 'active'?
-        Prevents a notification if the appliance was never running.
-        Recommended: 50W
+        Prevents standby consumption from accidentally starting a session.
+        Recommended: 50W.
       default: 50
       selector:
         number:
@@ -69,9 +76,10 @@ blueprint:
     min_active_duration:
       name: Minimum active duration (seconds)
       description: >
-        How long must the appliance have been active before a notification is sent?
-        Prevents alerts from accidentally switching the appliance on briefly.
-        Recommended: 600s (10 minutes)
+        How long must the appliance run continuously above the minimum
+        active wattage before we consider the session valid?
+        Prevents alerts from briefly toggling the appliance on by accident.
+        Recommended: 600 seconds (10 minutes).
       default: 600
       selector:
         number:
@@ -82,62 +90,76 @@ blueprint:
 
     notification_message:
       name: Notification message
-      description: "The body text of the notification"
+      description: "The body text of the notification."
       default: "The appliance is done ✅"
+      selector:
+        text:
+
+    notification_title:
+      name: Notification title
+      description: "The title of the notification."
+      default: "Appliance done 🏠"
       selector:
         text:
 
     notify_devices:
       name: Devices to notify
       description: >
-        Select the mobile devices that receive the notification.
+        The mobile devices that receive the notification.
         Multiple devices can be selected.
       selector:
         device:
           integration: mobile_app
           multiple: true
 
-mode: single
+# restart so a fresh activation during the waiting phase resets the watch
+# instead of being silently dropped (which 'single' mode would do).
+mode: restart
+max_exceeded: silent
 
+# ---------------------------------------------------------------------------
+# Step 1 — open a session as soon as the appliance has been running
+# continuously above 'min_active_watt' for 'min_active_duration'.
+# This trigger acts as a gatekeeper; only after it fires do we start
+# watching for the end of the cycle.
+# ---------------------------------------------------------------------------
 trigger:
   - trigger: numeric_state
     entity_id: !input power_sensor
-    below: !input threshold_watt
+    above: !input min_active_watt
     for:
-      seconds: !input stability_seconds
-
-variables:
-  min_active_watt: !input min_active_watt
-  min_active_duration: !input min_active_duration
-  power_sensor: !input power_sensor
-
-condition:
-  - condition: template
-    value_template: >
-      {% set from_state = trigger.from_state %}
-      {% set to_state   = trigger.to_state %}
-
-      {% if from_state is none or to_state is none %}
-        false
-      {% elif to_state.state in ['unknown', 'unavailable'] %}
-        false
-      {% else %}
-        {% set ns = namespace(was_active=false) %}
-        {% for s in state_history(power_sensor, min_active_duration, now()) %}
-          {% if s.state not in ['unknown', 'unavailable'] %}
-            {% if (s.state | float(0)) >= min_active_watt %}
-              {% set ns.was_active = true %}
-            {% endif %}
-          {% endif %}
-        {% endfor %}
-        {{ ns.was_active }}
-      {% endif %}
+      seconds: !input min_active_duration
 
 action:
-  - repeat:
-      for_each: !input notify_devices
-      sequence:
-        - action: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
-          data:
-            message: !input notification_message
-            title: "Appliance done 🏠"
+  # Step 2 — wait until power drops below the threshold and stays there.
+  # wait_for_trigger blocks this run instance until the condition holds,
+  # without polling.
+  #
+  # timeout: 12 hours — guards against sensors that never reach 0 (e.g. a
+  # stuck reading). continue_on_timeout: false ensures we don't notify
+  # when the timeout fires instead of the trigger.
+  - wait_for_trigger:
+      - trigger: numeric_state
+        entity_id: !input power_sensor
+        below: !input threshold_watt
+        for:
+          seconds: !input stability_seconds
+    timeout:
+      hours: 12
+    continue_on_timeout: false
+
+  # Safety net: when wait_for_trigger times out, continue_on_timeout=false
+  # ends the action cleanly. The notify below therefore only runs when the
+  # trigger actually fired.
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: "{{ wait.trigger is not none }}"
+        sequence:
+          - repeat:
+              for_each: !input notify_devices
+              sequence:
+                - action: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
+                  data:
+                    message: !input notification_message
+                    title: !input notification_title
